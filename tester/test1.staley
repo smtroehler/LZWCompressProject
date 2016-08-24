@@ -1,0 +1,149 @@
+LZW Compressor
+Specification
+
+1. Overview
+
+This assignment creates a Compress application that LZW compresses one or more files, to a format compatible with the TestExp utility that will be supplied as an executable.
+
+This requires implementation of an LZWCmp.h/c file pair, driven by a main program in a Compress.c file, and using the CodeSets.c file you built in a lab. The main accepts one or more filenames as commandline arguments, and uses LZWCmp to compress each, outputting the compressed data to files, as a series of 32-bit integers in hexadecimal, comprising the LZW codes that may in turn be read and decompressed by TestExp.
+
+You are expected already to understand LZW compression from website references, in-class lectures and exercises and from the companion lecture to this specification.
+
+2. General Requirements
+
+Write two files, Compress.c and LZWCmp.c. Use also your CodeSets.c file from an earlier exercise, along with the CodeSets.h file supplied in the project materials.
+
+LZWCmp.c
+
+LZWCmp.c gives implementations of the five LZW functions defined in the LZWCmp.h file, and may include additional static functions to support those five LZW functions. See the LZWCmp.h file for details on these.
+Compress.c
+
+Compress.c contains a main program, and a CodeSink function, to work with the LZWCmp.c file. It can be run thus:
+
+Compress file1 file2 ...
+
+Compress produces a compressed data file with a .Z suffix for each file listed in the commandline arguments: thus file1.Z, file2.Z, etc.
+
+Compress.c also takes several commandline flag arguments. These are provided, prefixed with a -, before any filenames. So one might run Compress thus:
+
+Compress -t -c file1 file2...
+
+or
+
+Compress -tcb file1 file2...
+
+The meaning of each argument flag is:
+
+t
+Dump the content of the LZW dictionary BST, expressing symbols as integer values, as each symbol is processed. (Recall from prior coursework that a small recursive function is a good way to dump a BST in sorted order.)
+
+c
+Show each individual code as it's sent to the CodeSink.
+
+b
+Announce each increase in bits per code as it occurs.
+
+r
+Announce each dictionary recycle as it occurs
+
+s
+Announce space used after each file is compressed, and after all files are compressed and the freelist is cleared. Each post-file space report assumes that the dynamically allocated space for the .Z filename is still unfreed; you should allocate just enough space for that name.
+
+All flag-generated output is to stdout, not stderr.
+Debugging with commandline arguments
+
+You must match the output of my model executable exactly, per the rules for Bender submission, and that includes matching my output for each commandline argument. You can see the format of that output by running the supplied Compress executable with the flag arguments.
+This is an additional requirement, but it's also meant as an aide to debugging. When you write an app this complex, you instrument it for testing – you add additional code for the sole purpose of testing. Use the commandline arguments to compare your tree with mine, to check that you're advancing bit counts, doing recycling, etc.
+Supplied .o Files
+
+I have also supplied a Compress.o file. You must be able to compile your .c files on Unix with my Compress.o file and produce a correctly working executable:
+
+gcc Compress.o LZWCmp.c SmartAlloc.c CodeSet.c (my Compress with your LZWCmp)
+
+Also supplied is a Stress.o file. This file links with your LZWCmp.c, asking it to compress an artificially generated sequence of considerable length, with a high recycle threshold. Your code must run in at most twice the run time of mine under this stress test. Stress.o runs a pair of LZWCmp objects in parallel, giving each in turn a symbol, and checksumming their outputs, printing a final checksum for each. The first it gives a series of 500000 zero codes; the second it gives 500000 symbols in a repeated 0-255 pattern.
+SmartAlloc
+
+You must include the SmartAlloc.h file at the top of both of your .c files and compile with SmartAlloc.c.
+Turnin
+
+When you are done, turn in your MyLib.h (required), Compress.c, CodeSet.c and LZWCmp.c files to the directory ~grade_cstaley/357/Compress/turnin. Bender will discard any CodeSet.h or LZWCmp.h file you submit – you must get your code working with the CodeSet.h and LZWCmp.h files supplied.
+
+A special note: this particular Bender setup uses diff alone, not diff -bw, to check your .Z files. They must match our output exactly, letter for letter.
+
+3. Compress Details
+
+The main program initializes an LZWCmp struct via LZWCmpInit, giving it a function pointer to the CodeSink callback function in Compress, which function simply prints each 4-byte uint sent to it as 8 hex digits, to the right .Z file. It prints 8 integers per line, with one space between each pair of integers, and no space after the final integer, just an EOL. This 8-per-line requirement is not trivial, and will require a configuration object, supplied via the void * parameter. The callback may not use a static local variable. There must be no static variables in Compress.
+
+Compress also processes commandline argument flags, and uses these to assemble a single bit-flag integer of trace options, passed to LZWCmpInit. And it sets the dictionary recycle size to 4096 (see below).
+
+Once the LZWCmp is initialized, Compress opens each file from the commandline in turn, sets up an initial LZWCmp object for the file, and then passes each byte of the file as a symbol to LZWCmpEncode to be LZW compressed. The symbol alphabet will always be the full set of possible byte values.
+
+After EOF is reached on each file. Compress calls LZWCmpStop to end the compression process, and LZWCmpDestruct to clean up allocated data.
+
+After all files are compressed, Compress ends with these mandatory three lines.
+
+LZWCmpClearFreelist();
+if (reportSpace) // flag that results from the -s commandline option
+printf("Final space: %ld\n", report_space());
+
+4. LZWCmp Details
+
+Much of the LZWCmp system was discussed in online lecture, and you’ll need to draw on your notes to understand how to use the LZWCmp.h file. Some highlights, however:
+
+A. The types UInt, UShort, etc. are in the MyLib.h file. Use these instead of writing "unsigned int", etc.
+
+B. We use a BST structure to keep track of the code dictionary.
+
+C. Reserve code 256 for EOD. The LZW compressor sends this code only once, at the end of the entire compression sequence for a given file. It does not need to go into the BST, since you'll never search for it.
+
+D. When the LZW compressor reaches the point where it would add the code numbered recycleCode (from the LZWCmp struct) to the dictionary, it instead clears the entire code dictionary, returning the BST to its initial state with just the 256 codes for the alphabet. Then, on the next call of LZWCmpEncode, it resumes building the dictionary from this starting point. Recycling the dictionary is generally needed when memory and codes get too high. We'll recycle it after just 4096 codes to make it easier to test, but the StressTest driver mentioned above will set a much higher limit.
+
+E. The LZWStop function sends whatever final code is pending, and the EOD code. Note that this might result in two successive calls of the CodeSink function if both codes are long enough, plus a third call for the "done" indication. The final valid uint passed to CodeSink must have zeroed bits for the unused portion in its bottommost bits.
+
+F. Use a freelist of TreeNodes, to improve allocation/deallocation speed. Maintain the head pointer for this freelist as a static datum in LZWCmp.c. Clear this list only when LZWCmpClearFreelist is called, after all files are compressed.
+
+G. As you expand the partially complete code, adding one new symbol at a time, you will need to expand the space for the partial code. Don't do this by reallocating one extra byte for each symbol. Instead, allocate a block of 1024 bytes initially, even if you use only part of it, and expand the block by 1024 bytes at a time if you run out of space. This is more efficient, and will match my space output.
+
+5. Suggested Order of Implementation
+You may have noticed that this is a complex assignment. If you find it daunting, you're not alone. Here is a list of suggestions for managing the assignment. Unless you are feeling very confident, you should follow this order of development. Do not just write the whole thing from scratch and then try to test it. Develop incrementally.
+
+A. Write test cases to augment the ones we discussed in the LZW lectures. Pick unusual patterns and cases that we didn't do in the lectures. Run your test cases against my Compress to check your answers. Run them with commandline arguments to see how they work under the hood.
+
+B.. Write a version that does nothing but send back the code of each symbol via the CodeSink, without even building a BST or using LZW. Use a separate call of CodeSink for each code -- don't pack the bits. And, at this phase, don't worry about the three fields in LZWCmp for progressive tree traversal. You'll figure them out later.
+
+C. Version B, but build the initial BST, with one-symbol codes filled in, and consult it to obtain the code for each symbol. Still, don't add any new codes.
+
+D. Version C, but now build the BST and add new codes. However, don't worry about the "dictionary refresh" after recycleCode is reached. And still don't pack the bits. You can use Compress -c to verify your codes at this stage. This is where you'll use the three fields for tree traversal that you ignored in step B, but first think through the algorithm for traversing the tree, and come up with data needs on your own. Then look at those three fields and see how they can be used.
+
+One particular point will be the space for the partially complete new code. There's no way to predict this in advance; you just have to allocate a reasonable amount (I used 1 KB to start with, and bumped it up by 1 KB as needed.)
+
+E. Version D, but with LZWCmpDestruct working fully correctly. Recursion is allowed for this. Confirm that LZWDestruct works, verified by running with the -s flag.
+
+F. Version E, but pack the bits.
+
+G. Version F but add the dictionary refresh at recycleCode. You'll need to generate a big input file for the latter, probably some large text file. This spec, concatenated to itself several times, might do.
+
+H. Now, test with a lot of different data sets. Clean up the code style if needed. Send Bender a case of beer to appease him, and submit your code.
+
+6. Hints on Matching Space Reports
+Matching our space reports, given by -s, can be challenging, but it's an important verification that you're doing allocation correctly. Allocated space after LZWCmpStop includes:
+
+1. All TreeNodes in the BST, which are not freed until LZWCmpDestruct.
+2. Any TreeNodes still in the freelist from earlier LZWCmp objects.
+3. The CodeSet (with its one extra code, per earlier suggestion), but with no codes currently expanded.
+4. Filename strings for the .Z output files.
+5. Allocated character block for pCode
+
+Here is a checklist to look at if you don't match our -s output.
+
+a. Be sure you're maintaining the freelist of TreeNodes properly. There should be one freeList shared among all LZWCmp objects, and freed only by LZWCmpClearFreelist.
+
+b. Note my earlier suggestion regarding adding one extra code to CodeSet to make recycling simpler. You must do this to match my space output.
+
+c. Be sure you understood and implemented that bit about 1024 byte blocks for pCode. After LZWCmpStop, the pCode data is still allocated, and counts toward the space total.
+
+d. Do *not* allocate a LZWCmp object; use a simple local variable. There is no need to dynamically allocate it, and you should never use dynamic allocation unless you must.
+
+e. After LZWCmpStop, there should be no codes unfreed (not released via a FreeCode call). It's easy to accidentally leave one allocated, since a typical LZWCmp implementation keeps the curCode allocated. Clean that up in LZWCmpStop.
+
+f. If you are simply concatenating ".Z" to the end of commandline arguments to make the strings for output .Z filenames, please carefully review the lectures on strings, the dangers of being sloppy about available space in target strings, etc. And if you allocate space for such names, allocate only as much as needed. And test with the target data files in the current directory. Adding path names to them, e.g. Compress mydata/test1.in, makes the allocated space for them longer, and throws off your space counts.
